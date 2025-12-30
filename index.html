@@ -15,12 +15,20 @@
             background-color: #f0f0f0;
             margin: 0;
         }
-        #result {
+        #image-container {
+            position: relative;
+            width: 100%;
             max-width: 100%;
-            height: auto;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            overflow: hidden;
             margin-top: 20px;
             display: none; /* در ابتدا مخفی است */
+        }
+        #result {
+            width: 100%;
+            height: auto;
+            display: block;
+            position: relative;
+            bottom: -100px; /* این خط باعث می‌شود عکس 100px به بالا حرکت کند */
         }
         .loading {
             font-size: 1.5em;
@@ -32,43 +40,42 @@
     </style>
 </head>
 <body>
-
     <h1>تولیدگر تصویر هوش مصنوعی</h1>
     <p id="status">لطفا صبر کنید...</p>
     
-    <!-- جایی که عکس نمایش داده می‌شود -->
-    <img id="result" alt="تصویر تولید شده">
-
+    <!-- Container برای عکس -->
+    <div id="image-container">
+        <img id="result" alt="تصویر تولید شده">
+    </div>
+    
     <script>
         // 1. دریافت پارامترهای URL
         const urlParams = new URLSearchParams(window.location.search);
         const prompt = urlParams.get('prompt');
-
         const imgElement = document.getElementById('result');
         const statusElement = document.getElementById('status');
-
+        const containerElement = document.getElementById('image-container');
+        
         if (prompt) {
             // 2. رمزگذاری متن برای استفاده در URL
             const encodedPrompt = encodeURIComponent(prompt);
             
             // 3. ساخت آدرس API از Pollinations.ai
-            // این سرویس رایگان است و نیازی به کلید ندارد
             const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}`;
-
+            
             // 4. تنظیم رویداد بارگذاری عکس
             imgElement.onload = function() {
-                imgElement.style.display = 'block';
+                containerElement.style.display = 'block';
                 statusElement.style.display = 'none';
             };
-
+            
             imgElement.onerror = function() {
                 statusElement.innerHTML = '<span class="error">خطایی در تولید عکس رخ داد.</span>';
             };
-
+            
             // 5. شروع فرآیند بارگذاری
             imgElement.src = imageUrl;
             statusElement.innerText = `در حال تولید عکس برای: "${prompt}"`;
-
         } else {
             statusElement.innerHTML = `
                 <span class="error">لطفاً یک پرامپت (متن) وارد کنید.</span><br>
@@ -77,6 +84,5 @@
             `;
         }
     </script>
-
 </body>
 </html>
