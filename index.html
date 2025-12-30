@@ -15,20 +15,26 @@
             background-color: #f0f0f0;
             margin: 0;
         }
-        #image-container {
-            position: relative;
-            width: 100%;
-            max-width: 100%;
-            overflow: hidden;
+        #canvas-container {
             margin-top: 20px;
-            display: none; /* در ابتدا مخفی است */
+            display: none;
         }
-        #result {
-            width: 100%;
-            height: auto;
-            display: block;
-            position: relative;
-            bottom: -100px; /* این خط باعث می‌شود عکس 100px به بالا حرکت کند */
+        canvas {
+            max-width: 100%;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        #download-btn {
+            margin-top: 10px;
+            padding: 8px 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            display: none;
+        }
+        #download-btn:hover {
+            background-color: #45a049;
         }
         .loading {
             font-size: 1.5em;
@@ -37,45 +43,208 @@
         .error {
             color: red;
         }
+        .hidden {
+            display: none;
+        }
     </style>
 </head>
 <body>
     <h1>تولیدگر تصویر هوش مصنوعی</h1>
     <p id="status">لطفا صبر کنید...</p>
     
-    <!-- Container برای عکس -->
-    <div id="image-container">
-        <img id="result" alt="تصویر تولید شده">
+    <!-- کانتینر برای canvas -->
+    <div id="canvas-container">
+        <canvas id="result-canvas"></canvas>
+        <br>
+        <button id="download-btn">دانلود عکس برش‌خورده</button>
     </div>
     
     <script>
+        // ثبت Service Worker برای کنترل درخواست‌ها
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js').catch(error => {
+                console.log('Service Worker ثبت نشد:', error);
+            });
+        }
+
         // 1. دریافت پارامترهای URL
         const urlParams = new URLSearchParams(window.location.search);
         const prompt = urlParams.get('prompt');
-        const imgElement = document.getElementById('result');
         const statusElement = document.getElementById('status');
-        const containerElement = document.getElementById('image-container');
+        const containerElement = document.getElementById('canvas-container');
+        const downloadBtn = document.getElementById('download-btn');
         
         if (prompt) {
             // 2. رمزگذاری متن برای استفاده در URL
             const encodedPrompt = encodeURIComponent(prompt);
             
-            // 3. ساخت آدرس API از Pollinations.ai
+            // 3. استفاده از fetch برای دریافت تصویر
             const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}`;
             
-            // 4. تنظیم رویداد بارگذاری عکس
-            imgElement.onload = function() {
-                containerElement.style.display = 'block';
-                statusElement.style.display = 'none';
-            };
+            // تابع برای برش تصویر
+            async function processImage(imageBlob) {
+                return new Promise((resolve, reject) => {
+                    const img = new Image();
+                    const url = URL.createObjectURL(imageBlob);
+                    
+                    img.onload = function() {
+                        URL.revokeObjectURL(url);
+                        
+                        // ایجاد canvas
+                        const canvas = document.getElementById('result-canvas');
+                        const ctx = canvas.getContext('2d');
+                        
+                        // محاسبه ابعاد جدید (100 پیکسل از ارتفاع کم می‌کنیم)
+                        const originalWidth = img.naturalWidth;
+                        const originalHeight = img.naturalHeight;
+                        const newHeight = Math.max(originalHeight - 100, 1);
+                        
+                        // تنظیم ابعاد canvas
+                        canvas.width = originalWidth;
+                        canvas.height = newHeight;
+                        
+                        // کشیدن عکس روی canvas (فقط قسمت بالایی، بدون 100 پیکسل پایین)
+                        ctx.drawImage(
+                            img,
+                            0, 0,
+                            originalWidth, originalHeight,
+                            0, 0,
+                            originalWidth, newHeight
+                        );
+                        
+                        resolve(canvas);
+                    };
+                    
+                    img.onerror = function() {
+                        URL.revokeObjectURL(url);
+                        reject(new Error('خطا در بارگذاری تصویر'));
+                    };
+                    
+                    img.src = url;
+                });
+            }
             
-            imgElement.onerror = function() {
-                statusElement.innerHTML = '<span class="error">خطایی در تولید عکس رخ داد.</span>';
-            };
+            // شروع فرآیند
+            async function generateImage() {
+                try {
+                    statusElement.innerText = `در حال تولید عکس برای: "${prompt}"`;
+                    
+                    // دریافت تصویر با fetch
+                    const response = await fetch(imageUrl);
+                    
+                    if (!response.ok) {
+                        throw new Error(`خطا در دریافت تصویر: ${response.status}`);
+                    }
+                    
+                    const imageBlob = await response.blob();
+                    
+                    // پردازش تصویر
+                    await processImage(imageBlob);
+                    
+                    // نمایش canvas و دکمه دانلود
+                    containerElement.style.display = 'block';
+                    statusElement.style.display = 'none';
+                    downloadBtn.style.display = 'inline-block';
+                    
+                    // تنظیم رویداد برای دکمه دانلود
+                    setupDownloadHandler();
+                    
+                } catch (error) {
+                    console.error('خطا:', error);
+                    statusElement.innerHTML = `<span class="error">خطایی در تولید عکس رخ داد: ${error.message}</span>`;
+                }
+            }
             
-            // 5. شروع فرآیند بارگذاری
-            imgElement.src = imageUrl;
-            statusElement.innerText = `در حال تولید عکس برای: "${prompt}"`;
+            // تنظیم هندلر دانلود
+            function setupDownloadHandler() {
+                downloadBtn.onclick = async function() {
+                    try {
+                        const canvas = document.getElementById('result-canvas');
+                        
+                        // روش 1: استفاده از fetch و ایجاد Blob با URL سایت شما
+                        canvas.toBlob(async function(blob) {
+                            // ایجاد یک Blob جدید با متادیتای سایت شما
+                            const modifiedBlob = new Blob([blob], { 
+                                type: 'image/png',
+                                lastModified: Date.now()
+                            });
+                            
+                            // ایجاد URL از Blob
+                            const blobUrl = URL.createObjectURL(modifiedBlob);
+                            
+                            // ایجاد لینک دانلود با نام فایل تصادفی
+                            const timestamp = Date.now();
+                            const randomString = Math.random().toString(36).substring(2, 10);
+                            const filename = `image-${timestamp}-${randomString}.png`;
+                            
+                            const link = document.createElement('a');
+                            link.download = filename;
+                            link.href = blobUrl;
+                            link.style.display = 'none';
+                            
+                            // افزودن attribute برای نشان دادن منبع
+                            link.setAttribute('data-source', window.location.origin);
+                            
+                            document.body.appendChild(link);
+                            
+                            // ایجاد یک رویداد کلیک سفارشی
+                            const clickEvent = new MouseEvent('click', {
+                                view: window,
+                                bubbles: true,
+                                cancelable: true
+                            });
+                            
+                            // فرستادن رویداد
+                            link.dispatchEvent(clickEvent);
+                            
+                            // تمیزکاری با تاخیر
+                            setTimeout(() => {
+                                document.body.removeChild(link);
+                                URL.revokeObjectURL(blobUrl);
+                            }, 1000);
+                            
+                            // نمایش پیام موفقیت
+                            showDownloadSuccess();
+                            
+                        }, 'image/png', 1.0);
+                        
+                    } catch (error) {
+                        console.error('خطا در دانلود:', error);
+                        // روش جایگزین
+                        const canvas = document.getElementById('result-canvas');
+                        const link = document.createElement('a');
+                        link.download = `image-${Date.now()}.png`;
+                        link.href = canvas.toDataURL('image/png');
+                        link.click();
+                    }
+                };
+            }
+            
+            // نمایش پیام موفقیت دانلود
+            function showDownloadSuccess() {
+                const successMsg = document.createElement('div');
+                successMsg.textContent = 'عکس با موفقیت دانلود شد ✓';
+                successMsg.style.cssText = `
+                    position: fixed;
+                    top: 20px;
+                    right: 20px;
+                    background: #4CAF50;
+                    color: white;
+                    padding: 10px 20px;
+                    border-radius: 5px;
+                    z-index: 1000;
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+                `;
+                document.body.appendChild(successMsg);
+                
+                setTimeout(() => {
+                    document.body.removeChild(successMsg);
+                }, 3000);
+            }
+            
+            // شروع فرآیند تولید تصویر
+            generateImage();
+            
         } else {
             statusElement.innerHTML = `
                 <span class="error">لطفاً یک پرامپت (متن) وارد کنید.</span><br>
@@ -83,6 +252,23 @@
                 <code>?prompt=a cyberpunk cat</code>
             `;
         }
+        
+        // اضافه کردن متادیتا
+        document.addEventListener('DOMContentLoaded', function() {
+            // متا تگ‌ها برای شناسایی سایت شما
+            const metaGenerator = document.createElement('meta');
+            metaGenerator.name = 'generator';
+            metaGenerator.content = window.location.origin;
+            document.head.appendChild(metaGenerator);
+            
+            const metaAuthor = document.createElement('meta');
+            metaAuthor.name = 'author';
+            metaAuthor.content = window.location.hostname;
+            document.head.appendChild(metaAuthor);
+            
+            // اضافه کردن اطلاعات به عنوان صفحه
+            document.title = `تولید عکس هوش مصنوعی - ${window.location.hostname}`;
+        });
     </script>
 </body>
 </html>
